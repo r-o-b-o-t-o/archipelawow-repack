@@ -1,7 +1,7 @@
 name: Repack
 
-# Builds AzerothCore with the modules below, bundles it with MySQL into the server archive the
-# ArchipelaWoW Launcher installs, and publishes that as a release.
+# Builds AzerothCore with the modules below, bundles it with MySQL into the server archives the
+# ArchipelaWoW Launcher installs, one per build, and publishes them as a release.
 
 on:
   schedule:
@@ -12,10 +12,7 @@ on:
   workflow_dispatch:
 
 env:
-  # Named in the archive, ArchipelaWoW-Repack-<build>-<version>.zip, and in release.json: the launcher
-  # offers each archive of the latest release as a build, and updates to the one installed
-  BUILD: standard
-  # Modules built into the repack, one per line: a git repository, optionally followed by the branch
+  # Modules built into every build, one per line: a git repository, optionally followed by the branch
   # or tag to build instead of its default branch. Each is cloned into modules/<repository name>.
   MODULES: |
     https://github.com/r-o-b-o-t-o/mod-i-found-your-sword
@@ -24,8 +21,6 @@ env:
     https://github.com/azerothcore/mod-solo-lfg
     https://github.com/azerothcore/mod-transmog
 
-  AZEROTHCORE_REPOSITORY: https://github.com/azerothcore/azerothcore-wotlk
-  AZEROTHCORE_BRANCH: master
   # MySQL Community Server shipped in the repack, whose client library the core also links. Stay on
   # the 8.4 LTS line: AzerothCore doesn't support the releases after it.
   MYSQL_VERSION: 8.4.9
@@ -39,29 +34,55 @@ concurrency:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
-  repack:
-    name: Build and release
-    runs-on: windows-latest
-    timeout-minutes: 240
-    env:
-      BOOST_ROOT: C:\local\boost
-      MYSQL_DIR: C:\tools\mysql
-      GH_TOKEN: ${{ github.token }}
-      # Optional: a Discord webhook that is told when the workflow fails
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-    defaults:
-      run:
-        shell: pwsh
-
+  version:
+    name: Pick the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Pick the version
-        id: version
+      - id: version
         run: |
           # The run number keeps a manual run on the same day from reusing the tag
           "version=$(Get-Date -AsUTC -Format 'yyyy.M.d').$env:GITHUB_RUN_NUMBER" >> $env:GITHUB_OUTPUT
+
+  build:
+    name: Build ${{ matrix.build }}
+    needs: version
+    runs-on: windows-latest
+    # The most GitHub-hosted runners allow: mod-playerbots and mod-dungeon-clear nearly double the code to compile
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        # build: named in the archive, ArchipelaWoW-Repack-<build>-<version>.zip, and in release.json.
+        # The launcher offers each archive of the latest release as a build, and updates to the one installed.
+        # modules: built into this build only, on top of MODULES, in the same format
+        include:
+          - build: standard
+            azerothcore-repository: https://github.com/azerothcore/azerothcore-wotlk
+            azerothcore-branch: master
+          - build: playerbots
+            # mod-playerbots only builds on this fork
+            azerothcore-repository: https://github.com/mod-playerbots/azerothcore-wotlk
+            azerothcore-branch: Playerbot
+            modules: |
+              https://github.com/mod-playerbots/mod-playerbots
+              https://github.com/jrad7/mod-dungeon-clear
+    env:
+      BUILD: ${{ matrix.build }}
+      VERSION: ${{ needs.version.outputs.version }}
+      AZEROTHCORE_REPOSITORY: ${{ matrix.azerothcore-repository }}
+      AZEROTHCORE_BRANCH: ${{ matrix.azerothcore-branch }}
+      BUILD_MODULES: ${{ matrix.modules }}
+      BOOST_ROOT: C:\local\boost
+      MYSQL_DIR: C:\tools\mysql
+
+    steps:
+      - uses: actions/checkout@v7
 
       - name: Cache Boost and MySQL
         uses: actions/cache@v6
@@ -118,7 +139,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           git clone --depth 1 --branch $env:AZEROTHCORE_BRANCH $env:AZEROTHCORE_REPOSITORY azerothcore
-          foreach ($line in $env:MODULES -split "`n" | ForEach-Object Trim | Where-Object { $_ }) {
+          foreach ($line in "$env:MODULES`n$env:BUILD_MODULES" -split "`n" | ForEach-Object Trim | Where-Object { $_ }) {
             $url, $ref = $line -split '\s+'
             $name = ($url.TrimEnd('/') -split '/')[-1] -replace '\.git$'
             $branch = if ($ref) { @('--branch', $ref) } else { @() }
@@ -149,7 +170,6 @@ jobs:
       - name: Write the manifest and the release notes
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = '${{ steps.version.outputs.version }}'
           $core = [ordered]@{ repository = $env:AZEROTHCORE_REPOSITORY; commit = git -C azerothcore rev-parse HEAD }
           $modules = @(Get-ChildItem azerothcore/modules -Directory | ForEach-Object {
             [ordered]@{
@@ -161,7 +181,7 @@ jobs:
 
           # Read by the launcher: the installed version and build, and its About section
           [ordered]@{
-            version = $version
+            version = $env:VERSION
             build = $env:BUILD
             builtAt = (Get-Date -AsUTC).ToString('o')
             repository = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
@@ -170,9 +190,11 @@ jobs:
             mysql = $env:MYSQL_VERSION
           } | ConvertTo-Json -Depth 4 | Set-Content 'package/server/release.json'
 
+          # This build's section of the release notes
           $link = { param($component) "[``$($component.commit.Substring(0, 10))``]($($component.repository)/commit/$($component.commit))" }
           $notes = @(
-            "AzerothCore with the ArchipelaWoW modules, ready to run on Windows. Install it from the setup of the [ArchipelaWoW Launcher](https://github.com/r-o-b-o-t-o/archipelawow-launcher), which also updates it."
+            ''
+            "### $env:BUILD build"
             ''
             '| Component | Version |'
             '| --- | --- |'
@@ -180,21 +202,54 @@ jobs:
             $modules | ForEach-Object { "| $($_.name) | $(& $link $_) |" }
             "| MySQL Community Server | $env:MYSQL_VERSION |"
           )
-          $notes | Set-Content release-notes.md
+          $notes | Set-Content "release-notes-$env:BUILD.md"
 
       - name: Archive
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           Push-Location package
           # No top folder: the launcher extracts it into its own
-          7z a -tzip -mx=7 "../ArchipelaWoW-Repack-$env:BUILD-${{ steps.version.outputs.version }}.zip" server mysql
+          7z a -tzip -mx=7 "../ArchipelaWoW-Repack-$env:BUILD-$env:VERSION.zip" server mysql
           Pop-Location
+
+      - name: Hand the archive to the release
+        uses: actions/upload-artifact@v7
+        with:
+          name: repack-${{ matrix.build }}
+          path: |
+            ArchipelaWoW-Repack-*.zip
+            release-notes-*.md
+          if-no-files-found: error
+          # The archive is compressed already
+          compression-level: 0
+          retention-days: 1
+
+  release:
+    name: Release
+    # Only once every build is ready: the launcher updates the installed build from the latest release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: repack-*
+          merge-multiple: true
 
       - name: Publish the release
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $version = '${{ steps.version.outputs.version }}'
-          gh release create "v$version" "ArchipelaWoW-Repack-$env:BUILD-$version.zip" --title "ArchipelaWoW Repack $version" --notes-file release-notes.md --target $env:GITHUB_SHA
+          $notes = @(
+            "AzerothCore with the ArchipelaWoW modules, ready to run on Windows. Install it from the setup of the [ArchipelaWoW Launcher](https://github.com/r-o-b-o-t-o/archipelawow-launcher), which also updates it."
+            Get-Content release-notes-*.md
+          )
+          $notes | Set-Content release-notes.md
+          $archives = (Get-ChildItem ArchipelaWoW-Repack-*.zip).Name
+          gh release create "v$env:VERSION" $archives --title "ArchipelaWoW Repack $env:VERSION" --notes-file release-notes.md --target $env:GITHUB_SHA
 
       - name: Delete old releases
         run: |
@@ -207,8 +262,18 @@ jobs:
               gh release delete $_.tagName --yes --cleanup-tag
             }
 
+  report:
+    name: Report the failure
+    needs: [version, build, release]
+    if: failure()
+    runs-on: ubuntu-latest
+    env:
+      # Optional: a Discord webhook that is told when the workflow fails
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+    steps:
       - name: Report the failure
-        if: failure() && env.DISCORD_WEBHOOK_URL != ''
+        if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           $run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           $message = @{ content = "The ArchipelaWoW Repack release failed: $run" } | ConvertTo-Json

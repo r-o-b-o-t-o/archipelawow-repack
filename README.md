@@ -34,13 +34,20 @@ The launcher relies on this layout, on the archive names, and on the `version` a
 ## ⚙️ Releases
 
 [`repack.yml`](.github/workflows/repack.yml) builds a release every Saturday at 06:45 (Paris time).
-It builds the latest AzerothCore with the modules listed at the top of the workflow, bundles MySQL,
-publishes the archive, and deletes all but the latest three releases it made.
+It builds each build of the server in parallel, bundles MySQL with each, publishes their archives
+together once all of them succeeded, and deletes all but the latest three releases it made.
 
-To add a module, add its repository to `MODULES`, optionally followed by a branch or tag.
+The launcher offers each archive of the latest release as a build, and updates the installed server
+to the same build:
 
-`BUILD` names the archive's build, `standard` for now. The launcher offers each archive of the latest
-release as a build, and updates the installed server to the same build.
+| Build | AzerothCore | Modules |
+| --- | --- | --- |
+| `standard` | [azerothcore-wotlk](https://github.com/azerothcore/azerothcore-wotlk) `master` | `MODULES` |
+| `playerbots` | The [mod-playerbots fork](https://github.com/mod-playerbots/azerothcore-wotlk) `Playerbot` | `MODULES`, [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots) and [mod-dungeon-clear](https://github.com/jrad7/mod-dungeon-clear) |
+
+To add a module to every build, add its repository to `MODULES`, at the top of the workflow,
+optionally followed by a branch or tag. The builds are the `build` job's matrix, which sets each one's
+AzerothCore repository and branch, and the modules only it has.
 
 To be told on Discord when a release fails, add a `DISCORD_WEBHOOK_URL` repository secret holding the
 URL of a channel's webhook.
