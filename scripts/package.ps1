@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $CoreInstallDir, $CoreSourceDir, $MySqlDir, $OpenSslDir = @($CoreInstallDir, $CoreSourceDir, $MySqlDir, $OpenSslDir) |
     ForEach-Object { (Resolve-Path $_).Path }
-$OutputDir = [IO.Path]::GetFullPath([IO.Path]::Combine((Get-Location).Path, $OutputDir))
+$OutputDir = [IO.Path]::GetFullPath([IO.Path]::Combine((Get-Location).Path, $OutputDir)).TrimEnd('\', '/')
 
 function Copy-Tree([string] $Source, [string] $Destination, [string[]] $ExcludeDirs = @(), [string[]] $ExcludeFiles = @()) {
     $arguments = @($Source, $Destination, '/E', '/R:1', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS', '/NP')
