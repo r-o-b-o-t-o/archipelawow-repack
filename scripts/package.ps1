@@ -1,16 +1,14 @@
 <#
 .SYNOPSIS
-    Assembles the portable ArchipelaWoW Launcher folder from a built AzerothCore, MySQL and the launcher.
+    Assembles the server the ArchipelaWoW Launcher installs from a built AzerothCore and MySQL.
 
 .DESCRIPTION
-    Layout of the result, which the launcher's AppPaths mirrors:
+    Layout of the result, which the launcher extracts into its folder and its AppPaths mirrors:
 
-      ArchipelaWoW Launcher\
-        ArchipelaWoW.Launcher.exe    the launcher
-        licenses\                    the licenses of the bundled software, besides MySQL's in mysql\
-        server\bin\                  authserver, worldserver, dbimport, the extractors, their DLLs and configs\
-        server\source\               the SQL files of the core and its modules, read by the database updater
-        mysql\                       MySQL Community Server, trimmed down to what running it takes
+      server\bin\        authserver, worldserver, dbimport, the extractors, their DLLs and configs\
+      server\source\     the SQL files of the core and its modules, read by the database updater
+      server\licenses\   the licenses of the bundled software, besides MySQL's in mysql\
+      mysql\             MySQL Community Server, trimmed down to what running it takes
 
     Every DLL the binaries need is copied next to them, the Visual C++ runtime included, so nothing
     has to be installed. The script fails if a dependency is left out.
@@ -24,16 +22,14 @@ param(
     [Parameter(Mandatory)] [string] $MySqlDir,
     # The OpenSSL installation the core was built against
     [Parameter(Mandatory)] [string] $OpenSslDir,
-    # dotnet publish output of the launcher, with its licenses\
-    [Parameter(Mandatory)] [string] $LauncherDir,
-    # Where to create the ArchipelaWoW Launcher folder
+    # Where to create server\ and mysql\, replacing them if they exist
     [Parameter(Mandatory)] [string] $OutputDir
 )
 
 $ErrorActionPreference = 'Stop'
 # robocopy reports success with non-zero exit codes, Copy-Tree checks them itself
 $PSNativeCommandUseErrorActionPreference = $false
-$CoreInstallDir, $CoreSourceDir, $MySqlDir, $OpenSslDir, $LauncherDir = @($CoreInstallDir, $CoreSourceDir, $MySqlDir, $OpenSslDir, $LauncherDir) |
+$CoreInstallDir, $CoreSourceDir, $MySqlDir, $OpenSslDir = @($CoreInstallDir, $CoreSourceDir, $MySqlDir, $OpenSslDir) |
     ForEach-Object { (Resolve-Path $_).Path }
 $OutputDir = [IO.Path]::GetFullPath([IO.Path]::Combine((Get-Location).Path, $OutputDir))
 
@@ -82,11 +78,14 @@ function Get-MissingDependencies([string] $Directory, [string] $VisualStudio) {
     }
 }
 
-$root = Join-Path $OutputDir 'ArchipelaWoW Launcher'
-if (Test-Path $root) { Remove-Item $root -Recurse -Force }
-$serverBin = New-Item -ItemType Directory (Join-Path $root 'server\bin')
-$source = Join-Path $root 'server\source'
+$root = $OutputDir
+$server = Join-Path $root 'server'
 $mysql = Join-Path $root 'mysql'
+foreach ($dir in $server, $mysql) {
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+}
+$serverBin = New-Item -ItemType Directory (Join-Path $server 'bin')
+$source = Join-Path $server 'source'
 $visualStudio = Find-VisualStudio
 $vcRuntime = Get-VcRuntime $visualStudio
 
@@ -121,12 +120,9 @@ $keep = 'mysqld.exe', 'mysql.exe', 'mysqladmin.exe', 'mysqldump.exe', 'mysqlchec
 Get-ChildItem (Join-Path $mysql 'bin\*.exe') | Where-Object Name -notin $keep | Remove-Item
 $vcRuntime | Copy-Item -Destination (Join-Path $mysql 'bin')
 
-Write-Host '== Launcher'
-Get-ChildItem $LauncherDir -File | Where-Object Extension -in '.exe', '.dll' | Copy-Item -Destination $root
-
 Write-Host '== Licenses'
-$licenses = New-Item -ItemType Directory (Join-Path $root 'licenses')
-Copy-Item (Join-Path $LauncherDir 'licenses\*') $licenses
+# Apart from the launcher's own, in licenses\ next to it
+$licenses = New-Item -ItemType Directory (Join-Path $server 'licenses')
 Copy-Item (Join-Path $CoreSourceDir 'LICENSE') (Join-Path $licenses 'AzerothCore.txt')
 $openSslLicense = Get-ChildItem $OpenSslDir -Filter 'license*' -File | Select-Object -First 1
 if (-not $openSslLicense) { throw "OpenSSL's license is missing from $OpenSslDir." }
@@ -151,5 +147,5 @@ $missing = @(Get-MissingDependencies $serverBin $visualStudio) + @(Get-MissingDe
 if ($missing) { throw "Missing DLLs:`n$($missing -join "`n")" }
 Write-Host 'Every DLL the binaries import is present.'
 
-$size = (Get-ChildItem $root -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
-Write-Host ("Packaged {0} ({1:N0} MB)" -f $root, $size)
+$size = (Get-ChildItem $server, $mysql -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
+Write-Host ("Packaged {0} and {1} ({2:N0} MB)" -f $server, $mysql, $size)

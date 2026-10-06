@@ -1,7 +1,7 @@
 name: Repack
 
-# Builds AzerothCore with the modules below, bundles it with MySQL and the launcher into the portable
-# ArchipelaWoW Launcher archive, and publishes that as a release.
+# Builds AzerothCore with the modules below, bundles it with MySQL into the server archive the
+# ArchipelaWoW Launcher installs, and publishes that as a release.
 
 on:
   schedule:
@@ -12,6 +12,9 @@ on:
   workflow_dispatch:
 
 env:
+  # Named in the archive, ArchipelaWoW-Repack-<build>-<version>.zip, and in release.json: the launcher
+  # offers each archive of the latest release as a build, and updates to the one installed
+  BUILD: standard
   # Modules built into the repack, one per line: a git repository, optionally followed by the branch
   # or tag to build instead of its default branch. Each is cloned into modules/<repository name>.
   MODULES: |
@@ -27,8 +30,6 @@ env:
   # the 8.4 LTS line: AzerothCore doesn't support the releases after it.
   MYSQL_VERSION: 8.4.9
   BOOST_VERSION: 1.87.0
-  # The apworld whose player options the launcher's YAML editor offers, taken from its latest release
-  APWORLD_REPOSITORY: r-o-b-o-t-o/archipelawow
   # Older releases made by this workflow are deleted once a new one is published
   RELEASES_TO_KEEP: 3
 
@@ -59,32 +60,8 @@ jobs:
       - name: Pick the version
         id: version
         run: |
-          # Also the launcher's version, without leading zeros so that it reads like its assembly version,
-          # which drops them. The run number keeps a manual run on the same day from reusing the tag.
+          # The run number keeps a manual run on the same day from reusing the tag
           "version=$(Get-Date -AsUTC -Format 'yyyy.M.d').$env:GITHUB_RUN_NUMBER" >> $env:GITHUB_OUTPUT
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      # Before the long build, so that a failure here doesn't take an hour to show up
-      - name: Generate the player options schema
-        id: apworld
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $archipelago = gh release view --repo ArchipelagoMW/Archipelago --json tagName --jq .tagName
-          git clone --depth 1 --branch $archipelago https://github.com/ArchipelagoMW/Archipelago.git archipelago
-          # Newest release, pre-releases included
-          $tag = gh release list --repo $env:APWORLD_REPOSITORY --limit 1 --json tagName --jq '.[0].tagName'
-          gh release download $tag --repo $env:APWORLD_REPOSITORY --pattern '*.apworld' --dir apworld
-          # An .apworld is a zip holding the world's folder
-          Get-ChildItem apworld\*.apworld | Rename-Item -NewName { "$($_.BaseName).zip" }
-          Expand-Archive apworld\*.zip -DestinationPath apworld
-          python -m pip install --quiet PyYAML schema typing_extensions pathspec
-          $world = Get-ChildItem apworld -Directory | Select-Object -First 1
-          python scripts/dump-options-schema.py --archipelago archipelago --world $world.FullName --output src/ui/src/data/options-schema.json
-          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Cache Boost and MySQL
         uses: actions/cache@v6
@@ -164,32 +141,15 @@ jobs:
       - name: Install
         run: cmake --install build --config Release
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: src/ui/package-lock.json
-
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Publish the launcher
-        # Builds the UI too, see BuildUi in the project
-        run: >
-          dotnet publish src/ArchipelaWoW.Launcher/ArchipelaWoW.Launcher.csproj -c Release -o publish
-          -p:Version=${{ steps.version.outputs.version }}
-
       - name: Package
         run: >
           ./scripts/package.ps1 -CoreInstallDir install -CoreSourceDir azerothcore -MySqlDir $env:MYSQL_DIR
-          -OpenSslDir $env:OPENSSL_ROOT_DIR -LauncherDir publish -OutputDir package
+          -OpenSslDir $env:OPENSSL_ROOT_DIR -OutputDir package
 
       - name: Write the manifest and the release notes
         run: |
           $ErrorActionPreference = 'Stop'
           $version = '${{ steps.version.outputs.version }}'
-          $apworld = '${{ steps.apworld.outputs.tag }}'
           $core = [ordered]@{ repository = $env:AZEROTHCORE_REPOSITORY; commit = git -C azerothcore rev-parse HEAD }
           $modules = @(Get-ChildItem azerothcore/modules -Directory | ForEach-Object {
             [ordered]@{
@@ -199,27 +159,26 @@ jobs:
             }
           })
 
-          # Read by the launcher, for its About section
+          # Read by the launcher: the installed version and build, and its About section
           [ordered]@{
             version = $version
+            build = $env:BUILD
             builtAt = (Get-Date -AsUTC).ToString('o')
             repository = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
             azerothcore = $core
             modules = $modules
             mysql = $env:MYSQL_VERSION
-            apworld = $apworld
-          } | ConvertTo-Json -Depth 4 | Set-Content 'package/ArchipelaWoW Launcher/release.json'
+          } | ConvertTo-Json -Depth 4 | Set-Content 'package/server/release.json'
 
           $link = { param($component) "[``$($component.commit.Substring(0, 10))``]($($component.repository)/commit/$($component.commit))" }
           $notes = @(
-            "AzerothCore with the ArchipelaWoW modules, ready to run on Windows: extract ``ArchipelaWoW-Launcher-$version.zip`` close to the root of a drive (e.g. ``C:\Games``) and start ``ArchipelaWoW.Launcher.exe``."
+            "AzerothCore with the ArchipelaWoW modules, ready to run on Windows. Install it from the setup of the [ArchipelaWoW Launcher](https://github.com/r-o-b-o-t-o/archipelawow-launcher), which also updates it."
             ''
             '| Component | Version |'
             '| --- | --- |'
             "| AzerothCore | $(& $link $core) |"
             $modules | ForEach-Object { "| $($_.name) | $(& $link $_) |" }
             "| MySQL Community Server | $env:MYSQL_VERSION |"
-            "| Player options | apworld [$apworld](https://github.com/$env:APWORLD_REPOSITORY/releases/tag/$apworld) |"
           )
           $notes | Set-Content release-notes.md
 
@@ -227,14 +186,15 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           Push-Location package
-          7z a -tzip -mx=7 "../ArchipelaWoW-Launcher-${{ steps.version.outputs.version }}.zip" 'ArchipelaWoW Launcher'
+          # No top folder: the launcher extracts it into its own
+          7z a -tzip -mx=7 "../ArchipelaWoW-Repack-$env:BUILD-${{ steps.version.outputs.version }}.zip" server mysql
           Pop-Location
 
       - name: Publish the release
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $version = '${{ steps.version.outputs.version }}'
-          gh release create "v$version" "ArchipelaWoW-Launcher-$version.zip" --title "ArchipelaWoW Launcher $version" --notes-file release-notes.md --target $env:GITHUB_SHA
+          gh release create "v$version" "ArchipelaWoW-Repack-$env:BUILD-$version.zip" --title "ArchipelaWoW Repack $version" --notes-file release-notes.md --target $env:GITHUB_SHA
 
       - name: Delete old releases
         run: |
@@ -251,5 +211,5 @@ jobs:
         if: failure() && env.DISCORD_WEBHOOK_URL != ''
         run: |
           $run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-          $message = @{ content = "The ArchipelaWoW Launcher release failed: $run" } | ConvertTo-Json
+          $message = @{ content = "The ArchipelaWoW Repack release failed: $run" } | ConvertTo-Json
           Invoke-RestMethod $env:DISCORD_WEBHOOK_URL -Method Post -ContentType 'application/json' -Body $message
