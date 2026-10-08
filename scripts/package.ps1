@@ -6,7 +6,7 @@
     Layout of the result, which the launcher extracts into its folder and its AppPaths mirrors:
 
       server\bin\        authserver, worldserver, dbimport, the extractors, their DLLs and configs\
-      server\source\     the SQL files of the core and its modules, read by the database updater
+      server\source\     the SQL files of the core, its modules and the repack, read by the database updater
       server\licenses\   the licenses of the bundled software, besides MySQL's in mysql\
       mysql\             MySQL Community Server, trimmed down to what running it takes
 
@@ -104,6 +104,8 @@ Write-Host '== SQL files'
 foreach ($dir in 'base', 'archive', 'updates', 'custom') {
     Copy-Tree (Join-Path $CoreSourceDir "data\sql\$dir") (Join-Path $source "data\sql\$dir")
 }
+# The repack's own, which the updater applies once like any custom update
+Copy-Tree (Join-Path (Split-Path $PSScriptRoot) 'sql') (Join-Path $source 'data\sql\custom')
 foreach ($module in Get-ChildItem (Join-Path $CoreSourceDir 'modules') -Directory) {
     $sql = Join-Path $module.FullName 'data\sql'
     if (Test-Path $sql) { Copy-Tree $sql (Join-Path $source "modules\$($module.Name)\data\sql") }
