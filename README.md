@@ -19,7 +19,8 @@ extracts into its folder:
 
 | Path | Contents |
 | --- | --- |
-| `server\bin` | authserver, worldserver, dbimport, the client data extractors, their DLLs, and `configs\` with the `.conf.dist` files |
+| `server\bin` | authserver, worldserver, dbimport, the client data extractors and their DLLs |
+| `server\configs` | The `.conf.dist` files the launcher creates the configuration from. The servers read `configs` from their working directory, so the launcher runs them from `server` |
 | `server\source` | The SQL files of the core and its modules, read by the database updater, and the repack's own from [`sql`](sql) in `data\sql\custom` |
 | `server\licenses` | The licenses of the bundled software, besides MySQL's, which are in `mysql` |
 | `server\release.json` | The version and the build, and what they were built from: versions and commits |

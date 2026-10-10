@@ -5,7 +5,8 @@
 .DESCRIPTION
     Layout of the result, which the launcher extracts into its folder and its AppPaths mirrors:
 
-      server\bin\        authserver, worldserver, dbimport, the extractors, their DLLs and configs\
+      server\bin\        authserver, worldserver, dbimport, the extractors and their DLLs
+      server\configs\    the .conf.dist files, read from the servers' working directory, server\
       server\source\     the SQL files of the core, its modules and the repack, read by the database updater
       server\licenses\   the licenses of the bundled software, besides MySQL's in mysql\
       mysql\             MySQL Community Server, trimmed down to what running it takes
@@ -92,6 +93,7 @@ $vcRuntime = Get-VcRuntime $visualStudio
 Write-Host '== Server binaries'
 # The .conf files only exist in an installation that was already used, the launcher creates its own
 Copy-Tree $CoreInstallDir $serverBin -ExcludeFiles '*.pdb', '*.lib', '*.exp', '*.ilk', '*.conf'
+Move-Item (Join-Path $serverBin 'configs') (Join-Path $server 'configs')
 Copy-Item (Join-Path $MySqlDir 'lib\libmysql.dll') $serverBin
 $legacy = @('bin\legacy.dll', 'lib\ossl-modules\legacy.dll') | ForEach-Object { Join-Path $OpenSslDir $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $legacy) { throw "legacy.dll, which the core loads at startup, is missing from $OpenSslDir." }

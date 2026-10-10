@@ -24,7 +24,9 @@ covers the archive and the releases.
 
 ## The server
 
-- The database updater opens SQL files as `server\bin\..\source\...` and isn't long-path aware: past
+- The configs go in `server/configs`: on Windows the core reads `configs/` from its working directory,
+  not next to the executables, and the launcher runs the servers from `server`.
+- The database updater opens SQL files as `server\source\...` and isn't long-path aware: past
   259 characters they fail to open. Keep SQL file and module names short.
 - Ship `data/sql/archive`: the base schemas list its updates as applied, and missing files are reported
   on every start.
