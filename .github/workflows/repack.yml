@@ -20,6 +20,7 @@ env:
     https://github.com/r-o-b-o-t-o/mod-dungeon-respawn
     https://github.com/azerothcore/mod-solo-lfg
     https://github.com/azerothcore/mod-transmog
+    https://github.com/Aldori15/mod-questie-bridge
 
   # MySQL Community Server shipped in the repack, whose client library the core also links. Stay on
   # the 8.4 LTS line: AzerothCore doesn't support the releases after it.
