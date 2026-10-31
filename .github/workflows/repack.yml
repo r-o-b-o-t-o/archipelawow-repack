@@ -74,6 +74,7 @@ jobs:
             modules: |
               https://github.com/mod-playerbots/mod-playerbots
               https://github.com/jrad7/mod-dungeon-clear
+              https://github.com/Wishmaster117/mod-multibot-bridge
     env:
       BUILD: ${{ matrix.build }}
       VERSION: ${{ needs.version.outputs.version }}
